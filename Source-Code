@@ -1,0 +1,93 @@
+import sys
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+
+import cv2
+import requests
+import time
+import os
+
+os.environ['DISPLAY'] = ':0'
+
+SERVER_URL = "https://www.circuitdigest.cloud/api/v1/helmet-detection/detect"
+API_KEY    = "YourApikey"
+
+MODE          = "keyboard"
+AUTO_INTERVAL = 10
+
+cap = cv2.VideoCapture(0, cv2.CAP_V4L2)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1024)
+
+if not cap.isOpened():
+    print("Camera not found! Check USB camera connection.")
+    sys.exit()
+
+print("Camera initialized.")
+print(f"Running in [{MODE}] mode")
+
+if MODE == "keyboard":
+    print("Press SPACE to capture | Press ESC to quit")
+elif MODE == "auto":
+    print(f"Auto capturing every {AUTO_INTERVAL} seconds | Press ESC to quit")
+
+def check_helmets(frame):
+    for _ in range(3):
+        cap.read()
+    ret, frame = cap.read()
+    if not ret:
+        print("Capture failed")
+        return
+
+    _, img_encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    img_bytes = img_encoded.tobytes()
+
+    headers = { "X-API-Key": API_KEY }
+    files   = { "imageFile": ("snap.jpg", img_bytes, "image/jpeg") }
+
+    try:
+        print("\nPhoto captured! Sending to API...")
+        response = requests.post(SERVER_URL, headers=headers,
+                                 files=files, timeout=15)
+
+        if response.status_code == 200:
+            safe_response = response.text.encode('utf-8', errors='replace').decode('utf-8')
+            print("Response:", safe_response)
+        else:
+            print(f"HTTP error: {response.status_code}")
+
+    except requests.exceptions.Timeout:
+        print("Request timed out!")
+    except Exception as e:
+        print(f"Error: {str(e).encode('utf-8', errors='replace').decode('utf-8')}")
+
+last_capture_time = 0
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        print("Failed to grab frame")
+        break
+
+    cv2.imshow("Helmet Detection - SPACE: capture | ESC: quit", frame)
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if MODE == "keyboard":
+        if key == 32:
+            print("\nCapturing image...")
+            check_helmets(frame)
+
+    elif MODE == "auto":
+        current_time = time.time()
+        if current_time - last_capture_time >= AUTO_INTERVAL:
+            last_capture_time = current_time
+            print("\nAuto capturing...")
+            check_helmets(frame)
+
+    if key == 27:
+        print("Quitting...")
+        break
+
+cap.release()
+cv2.destroyAllWindows()
